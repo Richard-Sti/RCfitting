@@ -1,1 +1,5 @@
 venv_rc_fitting/
+RCfitting/__pycache__/
+data/SPARC.h5
+.vscode/settings.json
+scripts/test.ipynb
