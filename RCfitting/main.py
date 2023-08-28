@@ -20,6 +20,8 @@ from jax import numpy as jnp
 from jax.scipy import stats as jstats
 from scipy.optimize import minimize
 
+from warnings import warn
+
 from tqdm import tqdm
 from joblib import Parallel, delayed
 
@@ -89,6 +91,7 @@ def parse_galaxy(name, fgals, Ups_bul_mean=0.7, Ups_disk_mean=0.5,
     data["e_inc"] = np.deg2rad(data["e_inc"])
 
     data["Mstar"] = 1e9 * fgals[name]["L36"][0]
+    data["e_Mstar"] = 1e9 * fgals[name]["e_L36"][0]
     data["MHI"] = 1e9 * fgals[name]["MHI"][0]
 
     # Precompute the products of the velocities
@@ -767,13 +770,23 @@ def minimize_single(kind, parsed_galaxy, method="L-BFGS-B", nconv=10,
 
     nparams = len(bounds)
     fval = np.full(nrepeat, np.nan)
-    x_min, fval_min, success = None, np.inf, False
+    x_min, dx_min = np.full(nparams, np.nan), np.full(nparams, np.nan)
+    fval_min, success = np.inf, False
 
     for n in range(nrepeat):
         x0 = initial_params_generator(kind, parsed_galaxy, seed=seed + n)
         res = minimize(jit_loss, x0=x0, method=method, args=(parsed_galaxy,),
                        tol=tol,
                        jac=grad_loss, bounds=bounds, options=options)
+
+        # Check if the optimizer is hitting bounds
+        for i in range(nparams):
+            x = res.x[i]
+            b0, b1 = bounds[i]
+            if np.isclose(x, b0) or np.isclose(x, b1):
+                warn(f"Optimizer hit bound for parameter {i}.", RuntimeWarning)
+                res.success = False
+                break
 
         if not res.success:
             continue
