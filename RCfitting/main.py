@@ -815,15 +815,19 @@ def minimize_single(kind, parsed_galaxy, method="L-BFGS-B", nconv=10,
         dx_min = np.full(nparams, np.nan)
         ll_min = np.nan
 
+    chi2 = -2 * ll_min
+    nobservations = parsed_galaxy["r"].size
+
     return {
         "x_min": x_min,
         "dx_min": dx_min,
         "loss_min": fval_min,
         "ll_min": ll_min,
-        "BIC": -2 * ll_min + nparams * np.log(parsed_galaxy["r"].size),
+        "BIC": nparams * np.log(nobservations) + chi2,
+        "reduced_chi2": chi2 / (nobservations - nparams),
         "success": success,
         "nparams": nparams,
-        "nobservations": parsed_galaxy["r"].size,
+        "nobservations": nobservations,
         "nrepeat": n + 1
         }
 
