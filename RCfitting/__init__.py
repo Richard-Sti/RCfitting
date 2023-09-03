@@ -21,5 +21,7 @@ from .main import (Vbar_squared, parse_galaxy,  # noqa
                    plot_fit  # noqa
                    )
 
+from .utils import extract_results, extract_gals  # noqa
+
 from jax import config
 config.update("jax_enable_x64", True)
