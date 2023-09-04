@@ -17,6 +17,7 @@ from .main import (Vbar_squared, parse_galaxy,  # noqa
                    squared_circular_velocity_NFW, Vobs_NFW,  # noqa
                    squared_circular_velocity_isothermal, Vobs_isothermal,  # noqa
                    Vobs_arctan,
+                   Vobs_RARIF,
                    minimize_single, minimize_many, initial_params_generator, bounds_generator,  # noqa
                    plot_fit  # noqa
                    )
