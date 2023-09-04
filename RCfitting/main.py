@@ -39,7 +39,7 @@ def parse_galaxy(name, fgals, Ups_bul_mean=0.7, Ups_disk_mean=0.5,
                  log_Ups_gas_std=0.04, log_M200c_bounds=(5.0, 17.0),
                  log_conc_bounds=(-3, 3), log_Vflat_arctan_bounds=(-1, 3),
                  log_rturn_arctan_bounds=(-1, 3), log_a0_bounds=(-2, 2),
-                 a0_mean=1.19, a0_std=0.034, prior_nstd=10,):
+                 a0_mean=1.19, a0_std=0.034, prior_nstd=50,):
     """
     Parse the data for a single galaxy.
 
@@ -1010,6 +1010,7 @@ def plot_fit(res, kind, parsed_galaxy):
     r0 = parsed_galaxy["r"]
 
     plt.figure()
+    cols = plt.rcParams["axes.prop_cycle"].by_key()["color"]
     if kind == "NFW":
         log_Ups_bul, log_Ups_disk, log_Ups_gas, inc, dist, log_M200c, log_conc = unpack_NFW_params(res["x_min"], parsed_galaxy)  # noqa
 
@@ -1017,15 +1018,29 @@ def plot_fit(res, kind, parsed_galaxy):
         Vobs, e_Vobs = Vobs_scaled(inc, parsed_galaxy)
 
         plt.errorbar(rnew, Vobs, yerr=e_Vobs, capsize=3,
-                     label=r"$V_{\rm obs}$")
+                     label=r"$V_{\rm obs}$", color=cols[0])
 
         pred_Vobs = Vobs_NFW(log_M200c, log_conc, log_Ups_bul, log_Ups_disk,
                              log_Ups_gas, dist, parsed_galaxy)
-        plt.plot(rnew, pred_Vobs, label=r"$V_{\rm pred}$")
+        plt.plot(rnew, pred_Vobs, label=r"$V_{\rm pred}$", color=cols[1])
 
         Vbar = Vbar_squared(log_Ups_bul, log_Ups_disk, log_Ups_gas, dist,
                             parsed_galaxy)**0.5
-        plt.plot(rnew, Vbar, label=r"$V_{\rm bar}$")
+        plt.plot(rnew, Vbar, label=r"$V_{\rm bar}$", color=cols[2])
+
+        # Plot the individual components
+        plt.plot(rnew, 10**(0.5 * log_Ups_bul) * parsed_galaxy["Vbul"],
+                 label=r"$V_{\rm bulge}$", c=cols[3])
+        plt.plot(rnew, 0.7**0.5 * parsed_galaxy["Vbul"], ls="--", c=cols[3])
+
+        plt.plot(rnew, 10**(0.5 * log_Ups_disk) * parsed_galaxy["Vdisk"],
+                 label=r"$V_{\rm disk}$", c=cols[4])
+        plt.plot(rnew, 0.5**0.5 * parsed_galaxy["Vdisk"], ls="--", c=cols[4])
+
+        plt.plot(rnew, 10**(0.5 * log_Ups_gas) * parsed_galaxy["Vgas"],
+                 c=cols[5], label=r"$V_{\rm gas}$")
+        plt.plot(rnew, parsed_galaxy["Vgas"], ls="--", c=cols[5])
+
     elif kind == "isothermal":
         log_Ups_bul, log_Ups_disk, log_Ups_gas, inc, dist, log_M200c, log_conc = unpack_isothermal_params(res["x_min"], parsed_galaxy)  # noqa
 
@@ -1043,6 +1058,20 @@ def plot_fit(res, kind, parsed_galaxy):
         Vbar = Vbar_squared(log_Ups_bul, log_Ups_disk, log_Ups_gas, dist,
                             parsed_galaxy)**0.5
         plt.plot(rnew, Vbar, label=r"$V_{\rm bar}$")
+
+        # Plot the individual components
+        plt.plot(rnew, 10**(0.5 * log_Ups_bul) * parsed_galaxy["Vbul"],
+                 label=r"$V_{\rm bulge}$", c=cols[3])
+        plt.plot(rnew, 0.7**0.5 * parsed_galaxy["Vbul"], ls="--", c=cols[3])
+
+        plt.plot(rnew, 10**(0.5 * log_Ups_disk) * parsed_galaxy["Vdisk"],
+                 label=r"$V_{\rm disk}$", c=cols[4])
+        plt.plot(rnew, 0.5**0.5 * parsed_galaxy["Vdisk"], ls="--", c=cols[4])
+
+        plt.plot(rnew, 10**(0.5 * log_Ups_gas) * parsed_galaxy["Vgas"],
+                 label=r"$V_{\rm gas}$", c=cols[5])
+        plt.plot(rnew, parsed_galaxy["Vgas"], ls="--", c=cols[5])
+
     elif kind == "arctan":
         inc, dist, log_Vflat, log_rturn = unpack_params_arctan(res["x_min"], parsed_galaxy)  # noqa
 
@@ -1070,6 +1099,19 @@ def plot_fit(res, kind, parsed_galaxy):
         Vbar = Vbar_squared(log_Ups_bul, log_Ups_disk, log_Ups_gas, dist,
                             parsed_galaxy)**0.5
         plt.plot(rnew, Vbar, label=r"$V_{\rm bar}$")
+
+        # Plot the individual components
+        plt.plot(rnew, 10**(0.5 * log_Ups_bul) * parsed_galaxy["Vbul"],
+                 label=r"$V_{\rm bulge}$", c=cols[3])
+        plt.plot(rnew, 0.7**0.5 * parsed_galaxy["Vbul"], ls="--", c=cols[3])
+
+        plt.plot(rnew, 10**(0.5 * log_Ups_disk) * parsed_galaxy["Vdisk"],
+                 label=r"$V_{\rm disk}$", c=cols[4])
+        plt.plot(rnew, 0.5**0.5 * parsed_galaxy["Vdisk"], ls="--", c=cols[4])
+
+        plt.plot(rnew, 10**(0.5 * log_Ups_gas) * parsed_galaxy["Vgas"],
+                 label=r"$V_{\rm gas}$", c=cols[5])
+        plt.plot(rnew, parsed_galaxy["Vgas"], ls="--", c=cols[5])
     else:
         raise ValueError(f"Unknown kind {kind}.")
 
