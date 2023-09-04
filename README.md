@@ -1,6 +1,10 @@
 # Galaxy Rotation Curve Fitting Library
 
-This library provides a suite of tools for fitting rotation curves to galaxy data (tested on SPARC) using various halo profile/dynamics: "NFW", "isothermal", and "arctan".
+This library provides a suite of tools for fitting rotation curves to galaxy data (tested on SPARC) using various halo profile/dynamics:
+- NFW dark matter profile
+- Isothermal dark matter profile
+- Arctan model of rotational velocity
+- MOND RAR IF model
 
 ## Features
 
