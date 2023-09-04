@@ -38,7 +38,8 @@ def parse_galaxy(name, fgals, Ups_bul_mean=0.7, Ups_disk_mean=0.5,
                  Ups_gas_mean=1.0, log_Ups_bul_std=0.1, log_Ups_disk_std=0.1,
                  log_Ups_gas_std=0.04, log_M200c_bounds=(5.0, 17.0),
                  log_conc_bounds=(-3, 3), log_Vflat_arctan_bounds=(-1, 3),
-                 log_rturn_arctan_bounds=(-1, 3), prior_nstd=10,):
+                 log_rturn_arctan_bounds=(-1, 3), log_a0_bounds=(-2, 2),
+                 a0_mean=1.19, a0_std=0.034, prior_nstd=10,):
     """
     Parse the data for a single galaxy.
 
@@ -68,6 +69,13 @@ def parse_galaxy(name, fgals, Ups_bul_mean=0.7, Ups_disk_mean=0.5,
         Bounds of log Vflat prior in km/s for the arctan profile.
     log_rturn_arctan_bounds : tuple, optional
         Bounds of log rturn prior in kpc for the arctan profile.
+    log_a0_bounds : tuple, optional
+        Bounds of log a0 prior in 1e-10 m / s^2 for the MOND RAR IF.
+    a0_mean : float, optional
+        Mean of the a_0 prior in 1e-10 m / s^2 for the MOND RAR IF.
+    a0_std : float, optional
+        Standard deviation of the a_0 prior in 1e-10 m / s^2 for the MOND
+        RAR IF.
     prior_nstd : float, optional
         Number of standard deviations to use for the prior bounds.
 
@@ -141,7 +149,19 @@ def parse_galaxy(name, fgals, Ups_bul_mean=0.7, Ups_disk_mean=0.5,
                              "log_rturn": 3,
                              }
 
-    data["inc_bounds"] = [np.deg2rad(30), np.deg2rad(90)]
+    # MOND RAR IF
+    data["log_a0_bounds"] = log_a0_bounds
+    data["a0_mean"] = a0_mean
+    data["a0_std"] = a0_std
+    data["RARIF_params"] = {"log_Ups_bul": 0,
+                            "log_Ups_disk": 1,
+                            "log_Ups_gas": 2,
+                            "inc": 3,
+                            "dist": 4,
+                            "log_a0": 5,
+                           }
+
+    data["inc_bounds"] = [np.deg2rad(30), np.deg2rad(150)]
     data["prior_nstd"] = prior_nstd
 
     data["h"] = 0.7
@@ -177,6 +197,15 @@ def Vbar_squared(log_Ups_bul, log_Ups_disk, log_Ups_gas, dist, parsed_galaxy):
 
     Vbar2 *= dist / parsed_galaxy["dist"]
     return Vbar2
+
+
+def Vobs_scaled(inc, parsed_galaxy):
+    Vobs_true = jnp.copy(parsed_galaxy["Vobs"])
+    Vobs_true *= (jnp.sin(parsed_galaxy["inc"]) / jnp.sin(inc))
+
+    e_Vobs = parsed_galaxy["e_Vobs"]
+
+    return Vobs_true, e_Vobs
 
 
 def initial_galaxy_params(parsed_galaxy, seed=None):
@@ -321,7 +350,7 @@ def squared_circular_velocity_NFW(log_M200c, log_concentration, dist,
 
     R200c = M200c2R200c(M200c, h=parsed_galaxy["h"])
     Rs = R200c / concentration
-    radius = (dist / parsed_galaxy["dist"]) * parsed_galaxy["r"]
+    radius = parsed_galaxy["r"] * (dist / parsed_galaxy["dist"])
 
     return ((GNEWTON * M200c) / radius) * (jnp.log(1. + radius / Rs) - radius / (radius + Rs)) / (jnp.log(1. + concentration) - concentration / (1. + concentration))  # noqa
 
@@ -380,14 +409,11 @@ def unpack_NFW_params(params, parsed_galaxy):
 def ll_NFW(params, parsed_galaxy):
     log_Ups_bul, log_Ups_disk, log_Ups_gas, inc, dist, log_M200c, log_conc = unpack_NFW_params(params, parsed_galaxy)  # noqa
 
-    # Inclination scaling
-    s_inc_ratio = jnp.sin(parsed_galaxy["inc"]) / jnp.sin(inc)
-    dVobs = Vobs_NFW(log_M200c, log_conc, log_Ups_bul, log_Ups_disk,
-                     log_Ups_gas, dist, parsed_galaxy)
-    dVobs /= s_inc_ratio
-    dVobs -= parsed_galaxy["Vobs"]
+    Vobs_true, e_Vobs = Vobs_scaled(inc, parsed_galaxy)
+    Vobs_pred = Vobs_NFW(log_M200c, log_conc, log_Ups_bul, log_Ups_disk,
+                         log_Ups_gas, dist, parsed_galaxy)
 
-    return -0.5 * jnp.sum(jnp.square(dVobs) / parsed_galaxy["e_Vobs_squared"])
+    return -0.5 * jnp.sum(jnp.square((Vobs_pred - Vobs_true) / e_Vobs))
 
 
 def loss_NFW(params, parsed_galaxy):
@@ -518,14 +544,10 @@ def unpack_isothermal_params(params, parsed_galaxy):
 def ll_isothermal(params, parsed_galaxy):
     log_Ups_bul, log_Ups_disk, log_Ups_gas, inc, dist, log_M200c, log_conc = unpack_isothermal_params(params, parsed_galaxy)  # noqa
 
-    # Inclination scaling
-    s_inc_ratio = jnp.sin(parsed_galaxy["inc"]) / jnp.sin(inc)
-    dVobs = Vobs_isothermal(log_M200c, log_conc, log_Ups_bul, log_Ups_disk,
-                            log_Ups_gas, dist, parsed_galaxy)
-    dVobs /= s_inc_ratio
-    dVobs -= parsed_galaxy["Vobs"]
-
-    return -0.5 * jnp.sum(jnp.square(dVobs) / parsed_galaxy["e_Vobs_squared"])
+    Vobs, e_Vobs = Vobs_scaled(inc, parsed_galaxy)
+    Vobs_pred = Vobs_isothermal(log_M200c, log_conc, log_Ups_bul, log_Ups_disk,
+                                log_Ups_gas, dist, parsed_galaxy)
+    return -0.5 * jnp.sum(jnp.square((Vobs_pred - Vobs) / e_Vobs))
 
 
 def loss_isothermal(params, parsed_galaxy):
@@ -605,13 +627,9 @@ def Vobs_arctan(log_Vflat, log_rturn, dist, parsed_galaxy):
 
 def ll_arctan(params, parsed_galaxy):
     inc, dist, log_Vflat, log_rturn = unpack_params_arctan(params, parsed_galaxy)  # noqa
-
-    s_inc_ratio = jnp.sin(parsed_galaxy["inc"]) / jnp.sin(inc)
-    dVobs = Vobs_arctan(log_Vflat, log_rturn, dist, parsed_galaxy)
-    dVobs /= s_inc_ratio
-
-    dVobs -= parsed_galaxy["Vobs"]
-    return -0.5 * jnp.sum(jnp.square(dVobs) / parsed_galaxy["e_Vobs_squared"])
+    Vobs_true, e_Vobs = Vobs_scaled(inc, parsed_galaxy)
+    Vobs_pred = Vobs_arctan(log_Vflat, log_rturn, dist, parsed_galaxy)
+    return -0.5 * jnp.sum(jnp.square((Vobs_pred - Vobs_true) / e_Vobs))
 
 
 def loss_arctan(params, parsed_galaxy):
@@ -627,6 +645,95 @@ def loss_arctan(params, parsed_galaxy):
 
     ll = ll_arctan(params, parsed_galaxy)
     return -(ll + lp)
+
+
+###############################################################################
+#                                  RAR IF                                     #
+###############################################################################
+
+
+def param_bounds_RARIF(parsed_galaxy):
+    return {"log_a0": parsed_galaxy["log_a0_bounds"]}
+
+
+def initial_params_RARIF(parsed_galaxy, seed=None):
+    gen = np.random.RandomState(seed)
+    mu, std = parsed_galaxy["a0_mean"], parsed_galaxy["a0_std"]
+    return {"log_a0": np.log10(gen.normal(loc=mu, scale=std))}
+
+
+def unpack_params_RARIF(params, parsed_galaxy):
+    params_map = parsed_galaxy["RARIF_params"]
+
+    log_Ups_bul = params[params_map["log_Ups_bul"]]
+    log_Ups_disk = params[params_map["log_Ups_disk"]]
+    log_Ups_gas = params[params_map["log_Ups_gas"]]
+    inc = params[params_map["inc"]]
+    dist = params[params_map["dist"]]
+
+    log_a0 = params[params_map["log_a0"]]
+
+    return log_Ups_bul, log_Ups_disk, log_Ups_gas, inc, dist, log_a0
+
+
+def Vobs_RARIF(log_a0, log_Ups_bul, log_Ups_disk, log_Ups_gas, dist,
+               parsed_galaxy):
+    """
+    Model the observed circular velocity in MOND using the RAR IF.
+
+    Parameters
+    ----------
+    log_a0 : float
+        Log a0 in 1e-10 m / s^2.
+    log_Ups_bul : float
+        Log bulge mass-to-light ratio.
+    log_Ups_disk : float
+        Log disk mass-to-light ratio.
+    log_Ups_gas : float
+        Log gas mass-to-light ratio.
+    dist : float
+        Distance to the galaxy in Mpc.
+    parsed_galaxy : dict
+        Dictionary containing the parsed galaxy data.
+
+    Returns
+    -------
+    Vobs : float
+        Observed circular velocity in km/s.
+    """
+    # gbar is distance independent, so we pass the SPARC distance
+    Vbar2 = Vbar_squared(log_Ups_bul, log_Ups_disk, log_Ups_gas,
+                         parsed_galaxy["dist"], parsed_galaxy)
+    # Calculate gbar in 1e-10 m / s^2
+    gbar = Vbar2 / parsed_galaxy["r"] * 0.00032407792894443654
+
+    # Calculate gobs in 1e-10 m / s^2
+    gobs = gbar / (1 - jnp.exp(-jnp.sqrt(gbar / 10**log_a0)))
+
+    rdist = parsed_galaxy["r"] * (dist / parsed_galaxy["dist"])
+    return jnp.sqrt(gobs * rdist) * 55.54887561  # Convert to km/s
+
+
+def ll_RARIF(params, parsed_galaxy):
+    log_Ups_bul, log_Ups_disk, log_Ups_gas, inc, dist, log_a0 = unpack_params_RARIF(params, parsed_galaxy)  # noqa
+
+    Vobs_true, e_Vobs = Vobs_scaled(inc, parsed_galaxy)
+    Vobs = Vobs_RARIF(log_a0, log_Ups_bul, log_Ups_disk, log_Ups_gas, dist,
+                      parsed_galaxy)
+    return -0.5 * jnp.sum(jnp.square((Vobs - Vobs_true) / e_Vobs))
+
+
+def loss_RARIF(params, parsed_galaxy):
+    log_Ups_bul, log_Ups_disk, log_Ups_gas, inc, dist, log_a0 = unpack_params_RARIF(params, parsed_galaxy)  # noqa
+
+    lp = 0.
+    lp += log_prior_galaxy(parsed_galaxy, log_Ups_bul, log_Ups_disk,
+                           log_Ups_gas, inc, dist)
+    lp += jstats.norm.logpdf(10**log_a0, loc=parsed_galaxy["a0_mean"],
+                             scale=parsed_galaxy["a0_std"])
+
+    ll = ll_RARIF(params, parsed_galaxy)
+    return - (ll + lp)
 
 
 ###############################################################################
@@ -663,6 +770,10 @@ def initial_params_generator(kind, data, seed=None):
     elif kind == "arctan":
         params_map = data["arctan_params"]
         x0_ = {**initial_params_arctan(data, seed=seed),
+               **initial_galaxy_params(data, seed=seed)}
+    elif kind == "RARIF":
+        params_map = data["RARIF_params"]
+        x0_ = {**initial_params_RARIF(data, seed=seed),
                **initial_galaxy_params(data, seed=seed)}
     else:
         raise ValueError(f"Unknown kind `{kind}`.")
@@ -702,6 +813,10 @@ def bounds_generator(kind, data):
         params_map = data["arctan_params"]
         bounds_ = {**param_bounds_arctan(data),
                    **galaxy_bounds(data)}
+    elif kind == "RARIF":
+        params_map = data["RARIF_params"]
+        bounds_ = {**param_bounds_RARIF(data),
+                   **galaxy_bounds(data)}
     else:
         raise ValueError(f"Unknown kind {kind}.")
 
@@ -720,6 +835,8 @@ def loss_negll(kind):
         return loss_isothermal, ll_isothermal
     elif kind == "arctan":
         return loss_arctan, ll_arctan
+    elif kind == "RARIF":
+        return loss_RARIF, ll_RARIF
     else:
         raise ValueError(f"Unknown kind {kind}.")
 
@@ -772,19 +889,22 @@ def minimize_single(kind, parsed_galaxy, method="L-BFGS-B", nconv=10,
     fval = np.full(nrepeat, np.nan)
     x_min, dx_min = np.full(nparams, np.nan), np.full(nparams, np.nan)
     fval_min, success = np.inf, False
+    ind2pname = {i: pname
+                 for pname, i in parsed_galaxy[f"{kind}_params"].items()}
 
     for n in range(nrepeat):
         x0 = initial_params_generator(kind, parsed_galaxy, seed=seed + n)
         res = minimize(jit_loss, x0=x0, method=method, args=(parsed_galaxy,),
-                       tol=tol,
-                       jac=grad_loss, bounds=bounds, options=options)
+                       tol=tol, jac=grad_loss, bounds=bounds, options=options)
 
         # Check if the optimizer is hitting bounds
         for i in range(nparams):
             x = res.x[i]
             b0, b1 = bounds[i]
             if np.isclose(x, b0) or np.isclose(x, b1):
-                warn(f"Optimizer hit bound for parameter {i}.", RuntimeWarning)
+                pname = ind2pname[i]
+                warn(f"Optimizer hit bound for parameter {pname} = {x}.",
+                     RuntimeWarning)
                 res.success = False
                 break
 
@@ -818,13 +938,19 @@ def minimize_single(kind, parsed_galaxy, method="L-BFGS-B", nconv=10,
     chi2 = -2 * ll_min
     nobservations = parsed_galaxy["r"].size
 
+    if nobservations > nparams:
+        reduced_chi2 = chi2 / (nobservations - nparams)
+    else:
+        reduced_chi2 = np.nan
+
     return {
         "x_min": x_min,
         "dx_min": dx_min,
         "loss_min": fval_min,
         "ll_min": ll_min,
         "BIC": nparams * np.log(nobservations) + chi2,
-        "reduced_chi2": chi2 / (nobservations - nparams),
+        "AIC": 2 * nparams + chi2,
+        "reduced_chi2": reduced_chi2,
         "success": success,
         "nparams": nparams,
         "nobservations": nobservations,
@@ -887,11 +1013,10 @@ def plot_fit(res, kind, parsed_galaxy):
     if kind == "NFW":
         log_Ups_bul, log_Ups_disk, log_Ups_gas, inc, dist, log_M200c, log_conc = unpack_NFW_params(res["x_min"], parsed_galaxy)  # noqa
 
-        s_inc_ratio = jnp.sin(parsed_galaxy["inc"]) / jnp.sin(inc)
         rnew = r0 * (dist / parsed_galaxy["dist"])
+        Vobs, e_Vobs = Vobs_scaled(inc, parsed_galaxy)
 
-        plt.errorbar(rnew, parsed_galaxy["Vobs"] * s_inc_ratio,
-                     yerr=parsed_galaxy["e_Vobs"] * s_inc_ratio, capsize=3,
+        plt.errorbar(rnew, Vobs, yerr=e_Vobs, capsize=3,
                      label=r"$V_{\rm obs}$")
 
         pred_Vobs = Vobs_NFW(log_M200c, log_conc, log_Ups_bul, log_Ups_disk,
@@ -904,11 +1029,10 @@ def plot_fit(res, kind, parsed_galaxy):
     elif kind == "isothermal":
         log_Ups_bul, log_Ups_disk, log_Ups_gas, inc, dist, log_M200c, log_conc = unpack_isothermal_params(res["x_min"], parsed_galaxy)  # noqa
 
-        s_inc_ratio = jnp.sin(parsed_galaxy["inc"]) / jnp.sin(inc)
         rnew = r0 * (dist / parsed_galaxy["dist"])
+        Vobs, e_Vobs = Vobs_scaled(inc, parsed_galaxy)
 
-        plt.errorbar(rnew, parsed_galaxy["Vobs"] * s_inc_ratio,
-                     yerr=parsed_galaxy["e_Vobs"] * s_inc_ratio, capsize=3,
+        plt.errorbar(rnew, Vobs, yerr=e_Vobs, capsize=3,
                      label=r"$V_{\rm obs}$")
 
         pred_Vobs = Vobs_isothermal(log_M200c, log_conc, log_Ups_bul,
@@ -922,17 +1046,30 @@ def plot_fit(res, kind, parsed_galaxy):
     elif kind == "arctan":
         inc, dist, log_Vflat, log_rturn = unpack_params_arctan(res["x_min"], parsed_galaxy)  # noqa
 
-        s_inc_ratio = jnp.sin(parsed_galaxy["inc"]) / jnp.sin(inc)
+        Vobs, e_Vobs = Vobs_scaled(inc, parsed_galaxy)
         rnew = r0 * (dist / parsed_galaxy["dist"])
-
-        plt.errorbar(rnew, parsed_galaxy["Vobs"] * s_inc_ratio,
-                     yerr=parsed_galaxy["e_Vobs"] * s_inc_ratio, capsize=3,
+        plt.errorbar(rnew, Vobs, yerr=e_Vobs, capsize=3,
                      label=r"$V_{\rm obs}$")
 
         pred_Vobs = Vobs_arctan(log_Vflat, log_rturn, dist, parsed_galaxy)
 
         plt.plot(rnew, pred_Vobs, label=r"$V_{\rm pred}$")
+    elif kind == "RARIF":
+        log_Ups_bul, log_Ups_disk, log_Ups_gas, inc, dist, log_a0 = unpack_params_RARIF(res["x_min"], parsed_galaxy)  # noqa
 
+        Vobs, e_Vobs = Vobs_scaled(inc, parsed_galaxy)
+        rnew = r0 * (dist / parsed_galaxy["dist"])
+
+        plt.errorbar(rnew, Vobs, yerr=e_Vobs, capsize=3,
+                     label=r"$V_{\rm obs}$")
+
+        pred_Vobs = Vobs_RARIF(log_a0, log_Ups_bul, log_Ups_disk, log_Ups_gas,
+                               dist, parsed_galaxy)
+        plt.plot(rnew, pred_Vobs, label=r"$V_{\rm pred}$")
+
+        Vbar = Vbar_squared(log_Ups_bul, log_Ups_disk, log_Ups_gas, dist,
+                            parsed_galaxy)**0.5
+        plt.plot(rnew, Vbar, label=r"$V_{\rm bar}$")
     else:
         raise ValueError(f"Unknown kind {kind}.")
 
