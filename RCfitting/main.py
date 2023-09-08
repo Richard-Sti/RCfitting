@@ -1018,7 +1018,6 @@ def plot_fit(res, kind, parsed_galaxy):
 
         rnew = r0 * (dist / parsed_galaxy["dist"])
         Vobs, e_Vobs = Vobs_scaled(inc, parsed_galaxy)
-        Vobs = parsed_galaxy["Vobs"]
 
         plt.errorbar(rnew, Vobs, yerr=e_Vobs, capsize=3,
                      label=r"$V_{\rm obs}$", color=cols[0])
@@ -1032,15 +1031,16 @@ def plot_fit(res, kind, parsed_galaxy):
         plt.plot(rnew, Vbar, label=r"$V_{\rm bar}$", color=cols[2])
 
         # Plot the individual components
-        plt.plot(rnew, 10**(0.5 * log_Ups_bul) * parsed_galaxy["Vbul"],
+        eta = (dist / parsed_galaxy["dist"])**0.5
+        plt.plot(rnew, 10**(0.5 * log_Ups_bul) * parsed_galaxy["Vbul"] * eta,
                  label=r"$V_{\rm bulge}$", c=cols[3])
         plt.plot(rnew, 0.7**0.5 * parsed_galaxy["Vbul"], ls="--", c=cols[3])
 
-        plt.plot(rnew, 10**(0.5 * log_Ups_disk) * parsed_galaxy["Vdisk"],
+        plt.plot(rnew, 10**(0.5 * log_Ups_disk) * parsed_galaxy["Vdisk"] * eta,
                  label=r"$V_{\rm disk}$", c=cols[4])
         plt.plot(rnew, 0.5**0.5 * parsed_galaxy["Vdisk"], ls="--", c=cols[4])
 
-        plt.plot(rnew, 10**(0.5 * log_Ups_gas) * parsed_galaxy["Vgas"],
+        plt.plot(rnew, 10**(0.5 * log_Ups_gas) * parsed_galaxy["Vgas"] * eta,
                  c=cols[5], label=r"$V_{\rm gas}$")
         plt.plot(rnew, parsed_galaxy["Vgas"], ls="--", c=cols[5])
 
@@ -1063,15 +1063,15 @@ def plot_fit(res, kind, parsed_galaxy):
         plt.plot(rnew, Vbar, label=r"$V_{\rm bar}$")
 
         # Plot the individual components
-        plt.plot(rnew, 10**(0.5 * log_Ups_bul) * parsed_galaxy["Vbul"],
+        plt.plot(rnew, 10**(0.5 * log_Ups_bul) * parsed_galaxy["Vbul"] * eta,
                  label=r"$V_{\rm bulge}$", c=cols[3])
         plt.plot(rnew, 0.7**0.5 * parsed_galaxy["Vbul"], ls="--", c=cols[3])
 
-        plt.plot(rnew, 10**(0.5 * log_Ups_disk) * parsed_galaxy["Vdisk"],
+        plt.plot(rnew, 10**(0.5 * log_Ups_disk) * parsed_galaxy["Vdisk"] * eta,
                  label=r"$V_{\rm disk}$", c=cols[4])
         plt.plot(rnew, 0.5**0.5 * parsed_galaxy["Vdisk"], ls="--", c=cols[4])
 
-        plt.plot(rnew, 10**(0.5 * log_Ups_gas) * parsed_galaxy["Vgas"],
+        plt.plot(rnew, 10**(0.5 * log_Ups_gas) * parsed_galaxy["Vgas"] * eta,
                  label=r"$V_{\rm gas}$", c=cols[5])
         plt.plot(rnew, parsed_galaxy["Vgas"], ls="--", c=cols[5])
 
@@ -1104,15 +1104,15 @@ def plot_fit(res, kind, parsed_galaxy):
         plt.plot(rnew, Vbar, label=r"$V_{\rm bar}$")
 
         # Plot the individual components
-        plt.plot(rnew, 10**(0.5 * log_Ups_bul) * parsed_galaxy["Vbul"],
+        plt.plot(rnew, 10**(0.5 * log_Ups_bul) * parsed_galaxy["Vbul"] * eta,
                  label=r"$V_{\rm bulge}$", c=cols[3])
         plt.plot(rnew, 0.7**0.5 * parsed_galaxy["Vbul"], ls="--", c=cols[3])
 
-        plt.plot(rnew, 10**(0.5 * log_Ups_disk) * parsed_galaxy["Vdisk"],
+        plt.plot(rnew, 10**(0.5 * log_Ups_disk) * parsed_galaxy["Vdisk"] * eta,
                  label=r"$V_{\rm disk}$", c=cols[4])
         plt.plot(rnew, 0.5**0.5 * parsed_galaxy["Vdisk"], ls="--", c=cols[4])
 
-        plt.plot(rnew, 10**(0.5 * log_Ups_gas) * parsed_galaxy["Vgas"],
+        plt.plot(rnew, 10**(0.5 * log_Ups_gas) * parsed_galaxy["Vgas"] * eta,
                  label=r"$V_{\rm gas}$", c=cols[5])
         plt.plot(rnew, parsed_galaxy["Vgas"], ls="--", c=cols[5])
     else:
