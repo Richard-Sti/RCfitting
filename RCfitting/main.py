@@ -88,6 +88,7 @@ def parse_galaxy(name, fgals, Ups_bul_mean=0.7, Ups_disk_mean=0.5,
         raise ValueError(f"Galaxy {name} not found in `fgals`.")
 
     data = {}
+    data["galaxy_name"] = {name: 0}
     for p in ("r", "Vbul", "Vgas", "Vdisk", "Vobs", "e_Vobs", "L36"):
         data[p] = fgals[name][p][:].astype(np.float64)
 
@@ -1010,12 +1011,14 @@ def plot_fit(res, kind, parsed_galaxy):
     r0 = parsed_galaxy["r"]
 
     plt.figure()
+    plt.title(f"{list(parsed_galaxy['galaxy_name'].keys())[0]} ({kind} fit)")
     cols = plt.rcParams["axes.prop_cycle"].by_key()["color"]
     if kind == "NFW":
         log_Ups_bul, log_Ups_disk, log_Ups_gas, inc, dist, log_M200c, log_conc = unpack_NFW_params(res["x_min"], parsed_galaxy)  # noqa
 
         rnew = r0 * (dist / parsed_galaxy["dist"])
         Vobs, e_Vobs = Vobs_scaled(inc, parsed_galaxy)
+        Vobs = parsed_galaxy["Vobs"]
 
         plt.errorbar(rnew, Vobs, yerr=e_Vobs, capsize=3,
                      label=r"$V_{\rm obs}$", color=cols[0])
