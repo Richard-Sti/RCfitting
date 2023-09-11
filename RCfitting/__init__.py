@@ -13,16 +13,17 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
-from .main import (Vbar_squared, parse_galaxy,  # noqa
-                   squared_circular_velocity_NFW, Vobs_NFW,  # noqa
-                   squared_circular_velocity_isothermal, Vobs_isothermal,  # noqa
-                   Vobs_arctan,
-                   Vobs_RARIF,
+from .main import (Vbar_squared, parse_galaxy,                                                  # noqa
+                   squared_circular_velocity_NFW, Vobs_NFW,                                     # noqa
+                   squared_circular_velocity_isothermal, Vobs_isothermal,                       # noqa
+                   squared_circular_velocity_Einasto, Vobs_Einasto,                             # noqa
+                   Vobs_arctan,                                                                 # noqa
+                   Vobs_RARIF,                                                                  # noqa
                    minimize_single, minimize_many, initial_params_generator, bounds_generator,  # noqa
-                   plot_fit  # noqa
+                   plot_fit                                                                     # noqa
                    )
 
-from .utils import extract_results, extract_gals  # noqa
+from .utils import extract_results, extract_gals                                                # noqa
 
 from jax import config
 config.update("jax_enable_x64", True)
