@@ -18,7 +18,9 @@ import numpy as np
 from jax import grad, hessian, jit
 from jax import numpy as jnp
 from jax.scipy import stats as jstats
+from jax.scipy.special import gamma, gammaincc
 from scipy.optimize import minimize
+import numdifftools as nd
 
 from warnings import warn
 
@@ -37,7 +39,8 @@ RHO200C = 200 * 277.54      # Msun / kpc^3  (h = 1)
 def parse_galaxy(name, fgals, Ups_bul_mean=0.7, Ups_disk_mean=0.5,
                  Ups_gas_mean=1.0, log_Ups_bul_std=0.1, log_Ups_disk_std=0.1,
                  log_Ups_gas_std=0.04, log_M200c_bounds=(5.0, 17.0),
-                 log_conc_bounds=(-3, 3), log_Vflat_arctan_bounds=(-1, 3),
+                 log_conc_bounds=(-3, 3), einasto_alpha_bounds=(-5, 5),
+                 log_Vflat_arctan_bounds=(-1, 3),
                  log_rturn_arctan_bounds=(-1, 3), log_a0_bounds=(-2, 2),
                  a0_mean=1.19, a0_std=0.034, prior_nstd=50,):
     """
@@ -65,6 +68,8 @@ def parse_galaxy(name, fgals, Ups_bul_mean=0.7, Ups_disk_mean=0.5,
         Bounds of log M200c prior in log10(Msun).
     log_conc_bounds : tuple, optional
         Bounds of log concentration prior.
+    einasto_alpha_bounds : tuple, optional
+        Bounds of Einasto index prior.
     log_Vflat_arctan_bounds : tuple, optional
         Bounds of log Vflat prior in km/s for the arctan profile.
     log_rturn_arctan_bounds : tuple, optional
@@ -141,6 +146,20 @@ def parse_galaxy(name, fgals, Ups_bul_mean=0.7, Ups_disk_mean=0.5,
                                  "log_concentration": 6,
                                  }
 
+    # Einasto halo
+    data["Einasto_log_M200c_bounds"] = log_M200c_bounds
+    data["Einasto_log_conc_bounds"] = log_conc_bounds
+    data["Einasto_alpha_bounds"] = einasto_alpha_bounds
+    data["Einasto_params"] = {"log_Ups_bul": 0,
+                              "log_Ups_disk": 1,
+                              "log_Ups_gas": 2,
+                              "inc": 3,
+                              "dist": 4,
+                              "log_M200c": 5,
+                              "log_concentration": 6,
+                              "alpha": 7,
+                              }
+
     # Arctan profile
     data["log_Vflat_arctan_bounds"] = log_Vflat_arctan_bounds
     data["log_rturn_arctan_bounds"] = log_rturn_arctan_bounds
@@ -160,7 +179,7 @@ def parse_galaxy(name, fgals, Ups_bul_mean=0.7, Ups_disk_mean=0.5,
                             "inc": 3,
                             "dist": 4,
                             "log_a0": 5,
-                           }
+                            }
 
     data["inc_bounds"] = [np.deg2rad(30), np.deg2rad(150)]
     data["prior_nstd"] = prior_nstd
@@ -568,6 +587,153 @@ def loss_isothermal(params, parsed_galaxy):
 
 
 ###############################################################################
+#                            Einasto halo                                     #
+###############################################################################
+
+
+def initial_params_Einasto(parsed_galaxy, seed=None):
+    gen = np.random.RandomState(seed)
+
+    a0, a1 = parsed_galaxy["Einasto_log_M200c_bounds"]
+    log_M200c = gen.uniform(low=a0, high=a1)
+
+    # TODO does this make sense?
+    mu = log_M200c_to_mean_log_concentration_NFW(log_M200c,
+                                                 h=parsed_galaxy["h"])
+    log_concentration = gen.normal(mu, 0.11)
+    alpha = gen.normal(0.2, 0.1)
+
+    return {"log_M200c": log_M200c,
+            "log_concentration": log_concentration,
+            "alpha": alpha}
+
+
+def param_bounds_Einasto(parsed_galaxy):
+    return {"log_M200c": parsed_galaxy["Einasto_log_M200c_bounds"],
+            "log_concentration": parsed_galaxy["Einasto_log_conc_bounds"],
+            "alpha": parsed_galaxy["Einasto_alpha_bounds"]}
+
+
+def incomplete_gamma(a, z):
+    return gamma(a) * gammaincc(a, z)
+
+
+def squared_circular_velocity_Einasto(log_M200c, log_concentration, alpha,
+                                      dist, parsed_galaxy):
+    """
+    Calculate the squared circular velocity for an Einasto halo.
+
+    Parameters
+    ----------
+    log_M200c : float
+        Log M200c in Msun.
+    log_concentration : float
+        Log concentration.
+    alpha : float
+        Einasto index.
+    dist : float
+        Distance to the galaxy in Mpc.
+    parsed_galaxy : dict
+        Dictionary containing the parsed galaxy data.
+
+    Returns
+    -------
+    Vdm2 : float
+        Squared circular velocity in km^2/s^2.
+    """
+    M200c, concentration = 10**log_M200c, 10**log_concentration
+
+    R200c = M200c2R200c(M200c, h=parsed_galaxy["h"])
+    radius = parsed_galaxy["r"] * (dist / parsed_galaxy["dist"])
+
+    return (GNEWTON * M200c / radius) * (incomplete_gamma(3. / alpha, 0) - incomplete_gamma(3. / alpha, 2. / alpha * (concentration * radius / R200c)**alpha)) / (incomplete_gamma(3. / alpha, 0) - incomplete_gamma(3. / alpha, 2. / alpha * concentration**alpha))  # noqa
+
+
+def Vobs_Einasto(log_M200c, log_concentration, alpha, log_Ups_bul,
+                 log_Ups_disk, log_Ups_gas, dist, parsed_galaxy):
+    """
+    Model the observed circular velocity for a NFW halo.
+
+    Parameters
+    ----------
+    log_M200c : float
+        Log M200c in Msun.
+    log_concentration : float
+        Log concentration.
+    alpha : float
+        Einasto index.
+    log_Ups_bul : float
+        Log bulge mass-to-light ratio.
+    log_Ups_disk : float
+        Log disk mass-to-light ratio.
+    log_Ups_gas : float
+        Log gas mass-to-light ratio.
+    dist : float
+        Distance to the galaxy in Mpc.
+    parsed_galaxy : dict
+        Dictionary containing the parsed galaxy data.
+
+    Returns
+    -------
+    Vobs : float
+        Observed circular velocity in km/s.
+    """
+    Vbar2 = Vbar_squared(log_Ups_bul, log_Ups_disk, log_Ups_gas, dist,
+                         parsed_galaxy)
+    Vdm2 = squared_circular_velocity_Einasto(log_M200c, log_concentration,
+                                             alpha, dist, parsed_galaxy)
+    return jnp.sqrt(Vbar2 + Vdm2)
+
+
+def unpack_Einasto_params(params, parsed_galaxy):
+    params_map = parsed_galaxy["Einasto_params"]
+
+    log_Ups_bul = params[params_map["log_Ups_bul"]]
+    log_Ups_disk = params[params_map["log_Ups_disk"]]
+    log_Ups_gas = params[params_map["log_Ups_gas"]]
+    inc = params[params_map["inc"]]
+    dist = params[params_map["dist"]]
+
+    log_M200c = params[params_map["log_M200c"]]
+    log_concentration = params[params_map["log_concentration"]]
+    alpha = params[params_map["alpha"]]
+
+    return (log_Ups_bul, log_Ups_disk, log_Ups_gas, inc, dist, log_M200c,
+            log_concentration, alpha)
+
+
+def ll_Einasto(params, parsed_galaxy):
+    log_Ups_bul, log_Ups_disk, log_Ups_gas, inc, dist, log_M200c, log_conc, alpha = unpack_Einasto_params(params, parsed_galaxy)  # noqa
+
+    Vobs_true, e_Vobs = Vobs_scaled(inc, parsed_galaxy)
+    Vobs_pred = Vobs_Einasto(log_M200c, log_conc, alpha, log_Ups_bul,
+                             log_Ups_disk, log_Ups_gas, dist, parsed_galaxy)
+
+    return -0.5 * jnp.sum(jnp.square((Vobs_pred - Vobs_true) / e_Vobs))
+
+
+def loss_Einasto(params, parsed_galaxy):
+    log_Ups_bul, log_Ups_disk, log_Ups_gas, inc, dist, log_M200c, log_conc, alpha = unpack_Einasto_params(params, parsed_galaxy)  # noqa
+
+    lp = 0.
+    # Galaxy parameters prior
+    lp += log_prior_galaxy(parsed_galaxy, log_Ups_bul, log_Ups_disk,
+                           log_Ups_gas, inc, dist)
+
+    b0, b1 = parsed_galaxy["Einasto_log_M200c_bounds"]
+    lp += jstats.uniform.logpdf(log_M200c, b0, b1 - b0)
+
+    b0, b1 = parsed_galaxy["Einasto_log_conc_bounds"]
+    lp += jstats.uniform.logpdf(log_conc, b0, b1 - b0)
+
+    b0, b1 = parsed_galaxy["Einasto_alpha_bounds"]
+    lp += jstats.uniform.logpdf(alpha, b0, b1 - b0)
+
+    ll = ll_Einasto(params, parsed_galaxy)
+    return - (ll + lp)
+
+
+###############################################################################
 #                            Arctan profile                                   #
 ###############################################################################
 
@@ -730,8 +896,11 @@ def loss_RARIF(params, parsed_galaxy):
     lp = 0.
     lp += log_prior_galaxy(parsed_galaxy, log_Ups_bul, log_Ups_disk,
                            log_Ups_gas, inc, dist)
-    lp += jstats.norm.logpdf(10**log_a0, loc=parsed_galaxy["a0_mean"],
-                             scale=parsed_galaxy["a0_std"])
+
+    b0, b1 = parsed_galaxy["log_a0_bounds"]
+    lp += jstats.uniform.logpdf(log_a0, b0, b1 - b0)
+    # lp += jstats.norm.logpdf(10**log_a0, loc=parsed_galaxy["a0_mean"],
+    #                          scale=parsed_galaxy["a0_std"])
 
     ll = ll_RARIF(params, parsed_galaxy)
     return - (ll + lp)
@@ -768,6 +937,10 @@ def initial_params_generator(kind, data, seed=None):
         params_map = data["isothermal_params"]
         x0_ = {**initial_params_isothermal(data, seed=seed),
                **initial_galaxy_params(data, seed=seed)}
+    elif kind == "Einasto":
+        params_map = data["Einasto_params"]
+        x0_ = {**initial_params_Einasto(data, seed=seed),
+                **initial_galaxy_params(data, seed=seed)}
     elif kind == "arctan":
         params_map = data["arctan_params"]
         x0_ = {**initial_params_arctan(data, seed=seed),
@@ -810,6 +983,10 @@ def bounds_generator(kind, data):
         params_map = data["isothermal_params"]
         bounds_ = {**param_bounds_isothermal(data),
                    **galaxy_bounds(data)}
+    elif kind == "Einasto":
+        params_map = data["Einasto_params"]
+        bounds_ = {**param_bounds_Einasto(data),
+                   **galaxy_bounds(data)}
     elif kind == "arctan":
         params_map = data["arctan_params"]
         bounds_ = {**param_bounds_arctan(data),
@@ -834,6 +1011,8 @@ def loss_negll(kind):
         return loss_NFW, ll_NFW
     elif kind == "isothermal":
         return loss_isothermal, ll_isothermal
+    elif kind == "Einasto":
+        return loss_Einasto, ll_Einasto
     elif kind == "arctan":
         return loss_arctan, ll_arctan
     elif kind == "RARIF":
@@ -924,7 +1103,13 @@ def minimize_single(kind, parsed_galaxy, method="L-BFGS-B", nconv=10,
 
     # Calculate error from the Hessian
     if success:
-        dx_min = np.diag(np.linalg.inv(hessian(loss)(x_min, parsed_galaxy)))
+        if kind != "Einasto":
+            dx_min = np.diag(
+                np.linalg.inv(hessian(loss)(x_min, parsed_galaxy)))
+        else:
+            dx_min = np.diag(
+                np.linalg.inv(nd.Hessian(loss)(x_min, parsed_galaxy)))
+
         dx_min.flags.writeable = True
         ll_min = float(ll(x_min, parsed_galaxy))
 
@@ -1044,6 +1229,38 @@ def plot_fit(res, kind, parsed_galaxy):
                  c=cols[5], label=r"$V_{\rm gas}$")
         plt.plot(rnew, parsed_galaxy["Vgas"], ls="--", c=cols[5])
 
+    elif kind == "Einasto":
+        log_Ups_bul, log_Ups_disk, log_Ups_gas, inc, dist, log_M200c, log_conc, alpha = unpack_Einasto_params(res["x_min"], parsed_galaxy)  # noqa
+
+        rnew = r0 * (dist / parsed_galaxy["dist"])
+        Vobs, e_Vobs = Vobs_scaled(inc, parsed_galaxy)
+
+        plt.errorbar(rnew, Vobs, yerr=e_Vobs, capsize=3,
+                     label=r"$V_{\rm obs}$", color=cols[0])
+
+        pred_Vobs = Vobs_Einasto(log_M200c, log_conc, alpha, log_Ups_bul,
+                                 log_Ups_disk, log_Ups_gas, dist,
+                                 parsed_galaxy)
+        plt.plot(rnew, pred_Vobs, label=r"$V_{\rm pred}$", color=cols[1])
+
+        Vbar = Vbar_squared(log_Ups_bul, log_Ups_disk, log_Ups_gas, dist,
+                            parsed_galaxy)**0.5
+        plt.plot(rnew, Vbar, label=r"$V_{\rm bar}$", color=cols[2])
+
+        # Plot the individual components
+        eta = (dist / parsed_galaxy["dist"])**0.5
+        plt.plot(rnew, 10**(0.5 * log_Ups_bul) * parsed_galaxy["Vbul"] * eta,
+                 label=r"$V_{\rm bulge}$", c=cols[3])
+        plt.plot(rnew, 0.7**0.5 * parsed_galaxy["Vbul"], ls="--", c=cols[3])
+
+        plt.plot(rnew, 10**(0.5 * log_Ups_disk) * parsed_galaxy["Vdisk"] * eta,
+                 label=r"$V_{\rm disk}$", c=cols[4])
+        plt.plot(rnew, 0.5**0.5 * parsed_galaxy["Vdisk"], ls="--", c=cols[4])
+
+        plt.plot(rnew, 10**(0.5 * log_Ups_gas) * parsed_galaxy["Vgas"] * eta,
+                 c=cols[5], label=r"$V_{\rm gas}$")
+        plt.plot(rnew, parsed_galaxy["Vgas"], ls="--", c=cols[5])
+
     elif kind == "isothermal":
         log_Ups_bul, log_Ups_disk, log_Ups_gas, inc, dist, log_M200c, log_conc = unpack_isothermal_params(res["x_min"], parsed_galaxy)  # noqa
 
@@ -1063,6 +1280,7 @@ def plot_fit(res, kind, parsed_galaxy):
         plt.plot(rnew, Vbar, label=r"$V_{\rm bar}$")
 
         # Plot the individual components
+        eta = (dist / parsed_galaxy["dist"])**0.5
         plt.plot(rnew, 10**(0.5 * log_Ups_bul) * parsed_galaxy["Vbul"] * eta,
                  label=r"$V_{\rm bulge}$", c=cols[3])
         plt.plot(rnew, 0.7**0.5 * parsed_galaxy["Vbul"], ls="--", c=cols[3])
@@ -1104,6 +1322,7 @@ def plot_fit(res, kind, parsed_galaxy):
         plt.plot(rnew, Vbar, label=r"$V_{\rm bar}$")
 
         # Plot the individual components
+        eta = (dist / parsed_galaxy["dist"])**0.5
         plt.plot(rnew, 10**(0.5 * log_Ups_bul) * parsed_galaxy["Vbul"] * eta,
                  label=r"$V_{\rm bulge}$", c=cols[3])
         plt.plot(rnew, 0.7**0.5 * parsed_galaxy["Vbul"], ls="--", c=cols[3])
