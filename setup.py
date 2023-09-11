@@ -5,6 +5,7 @@ BUILD_REQ = ["numpy", "scipy"]
 INSTALL_REQ = BUILD_REQ
 INSTALL_REQ += ["tqdm",
                 "h5py",
+                "numdifftools"
                 ]
 
 
