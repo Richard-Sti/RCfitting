@@ -1192,7 +1192,7 @@ def minimize_many(kind, parsed_galaxies, n_jobs=-1, method="L-BFGS-B",
 ###############################################################################
 
 
-def plot_fit(res, kind, parsed_galaxy):
+def plot_fit(res, kind, parsed_galaxy, fpath=None):
     r0 = parsed_galaxy["r"]
 
     plt.figure()
@@ -1340,5 +1340,8 @@ def plot_fit(res, kind, parsed_galaxy):
     plt.legend()
     plt.xlabel(r"$r ~ [\mathrm{kpc}]$")
     plt.ylabel(r"$V_{\rm circ} ~ [\mathrm{km} / \mathrm{s}]$")
+
+    if fpath is not None:
+        plt.savefig(fpath, bbox_inches="tight", dpi=450)
 
     plt.show()
